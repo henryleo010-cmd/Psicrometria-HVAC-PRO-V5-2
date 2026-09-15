@@ -1,0 +1,33 @@
+name: Compilar Psicrometria HVAC PRO V5.2 REV B
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+
+    steps:
+      - name: Descargar repositorio
+        uses: actions/checkout@v4
+
+      - name: Instalar Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Instalar PyInstaller
+        run: python -m pip install --upgrade pip pyinstaller
+
+      - name: Compilar programa
+        shell: pwsh
+        run: |
+          pyinstaller --noconfirm --clean --onefile --windowed `
+            --name "Psicrometria_HVAC_PRO_V5_2_REV_B" `
+            "psicrometria_hvac_pro_v5_2_REV_B.py"
+
+      - name: Subir EXE
+        uses: actions/upload-artifact@v4
+        with:
+          name: Psicrometria_HVAC_PRO_V5_2_REV_B
+          path: dist/Psicrometria_HVAC_PRO_V5_2_REV_B.exe
