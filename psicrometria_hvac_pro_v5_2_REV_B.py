@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-PSICROMETRIA HVAC PRO V6.1 INTERACTIVA
+PSICROMETRIA HVAC PRO V6.2 INTERACTIVA
 Carta interactiva: crear, mover y editar puntos; aplicar procesos entre cualquier par.
 Unidades IP en carta. Presion corregida automaticamente por altitud.
 """
@@ -64,7 +64,7 @@ PROCESSES=[
 class App(tk.Tk):
     def __init__(self):
         super().__init__()
-        self.title("PSICROMETRIA HVAC PRO V6.1 — CARTA PROFESIONAL")
+        self.title("PSICROMETRIA HVAC PRO V6.2 — ADP + BYPASS INTERACTIVO")
         self.geometry("1580x930"); self.minsize(1200,720)
         self.alt=tk.StringVar(value="1000")
         self.name=tk.StringVar(value="P1")
@@ -72,6 +72,12 @@ class App(tk.Tk):
         self.rh=tk.StringVar(value="50")
         self.pfrom=tk.StringVar(); self.pto=tk.StringVar()
         self.process=tk.StringVar(value=PROCESSES[0])
+        self.zone_point=tk.StringVar()
+        self.coil_in=tk.StringVar()
+        self.coil_out=tk.StringVar()
+        self.qs=tk.StringVar(value="80000")
+        self.ql=tk.StringVar(value="20000")
+        self.adp_result=None
         self.points={}; self.processes=[]; self.selected=None; self.drag=None
         self.build()
         self.add_point("OA",95,60); self.add_point("R",75,50); self.add_point("S",55,95)
@@ -88,7 +94,7 @@ class App(tk.Tk):
         self.configure(bg="#eef7ff")
 
         head=ttk.Frame(self,padding=8); head.pack(fill="x")
-        ttk.Label(head,text="❄  PSICROMETRIA HVAC PRO V6.1",foreground="#064da8",font=("Segoe UI",19,"bold")).pack(side="left")
+        ttk.Label(head,text="❄  PSICROMETRIA HVAC PRO V6.2",foreground="#064da8",font=("Segoe UI",19,"bold")).pack(side="left")
         ttk.Label(head,text="Altitud").pack(side="left",padx=(35,4))
         ttk.Entry(head,textvariable=self.alt,width=8).pack(side="left"); ttk.Label(head,text="m").pack(side="left")
         ttk.Button(head,text="Actualizar",command=self.recalc_all).pack(side="left",padx=5)
@@ -120,6 +126,20 @@ class App(tk.Tk):
         ttk.Label(pf,text="Hasta").grid(row=2,column=0,sticky="w"); self.cbto=ttk.Combobox(pf,textvariable=self.pto,state="readonly",width=19); self.cbto.grid(row=2,column=1)
         ttk.Button(pf,text="APLICAR PROCESO",style="Blue.TButton",command=self.apply_process).grid(row=3,column=0,columnspan=2,sticky="ew",pady=8)
         ttk.Button(pf,text="Borrar procesos",command=self.clear_processes).grid(row=4,column=0,columnspan=2,sticky="ew")
+
+        af=ttk.LabelFrame(left,text="3. ZONA → ADP → BYPASS",style="Card.TLabelframe",padding=8); af.pack(fill="x",pady=7)
+        ttk.Label(af,text="Punto de zona R").grid(row=0,column=0,sticky="w")
+        self.cbzone=ttk.Combobox(af,textvariable=self.zone_point,state="readonly",width=18); self.cbzone.grid(row=0,column=1,sticky="ew")
+        ttk.Label(af,text="Carga sensible").grid(row=1,column=0,sticky="w")
+        ttk.Entry(af,textvariable=self.qs,width=14).grid(row=1,column=1,sticky="ew"); ttk.Label(af,text="BTU/h").grid(row=1,column=2)
+        ttk.Label(af,text="Carga latente").grid(row=2,column=0,sticky="w")
+        ttk.Entry(af,textvariable=self.ql,width=14).grid(row=2,column=1,sticky="ew"); ttk.Label(af,text="BTU/h").grid(row=2,column=2)
+        ttk.Label(af,text="Entrada serpentín M/OA").grid(row=3,column=0,sticky="w")
+        self.cbin=ttk.Combobox(af,textvariable=self.coil_in,state="readonly",width=18); self.cbin.grid(row=3,column=1,sticky="ew")
+        ttk.Label(af,text="Salida serpentín S").grid(row=4,column=0,sticky="w")
+        self.cbout=ttk.Combobox(af,textvariable=self.coil_out,state="readonly",width=18); self.cbout.grid(row=4,column=1,sticky="ew")
+        ttk.Button(af,text="CALCULAR ADP + BYPASS",style="Blue.TButton",command=self.calculate_adp_bypass).grid(row=5,column=0,columnspan=3,sticky="ew",pady=(8,3))
+        ttk.Button(af,text="Limpiar ADP / BF",command=self.clear_adp).grid(row=6,column=0,columnspan=3,sticky="ew")
 
         hint=ttk.LabelFrame(left,text="MODO INTERACTIVO",style="Card.TLabelframe",padding=8); hint.pack(fill="x",pady=7)
         ttk.Label(hint,text="• Doble clic en la carta: crea un punto.\n• Arrastre un punto: cambia T y W.\n• Clic en un punto: lo selecciona.\n• Edite T/HR en el panel y actualice.\n• Puede encadenar varios procesos.",justify="left").pack(anchor="w")
@@ -155,9 +175,13 @@ class App(tk.Tk):
         names=list(self.points)
         for n in names:self.list.insert("end",n)
         self.cbfrom["values"]=names; self.cbto["values"]=names
+        self.cbzone["values"]=names; self.cbin["values"]=names; self.cbout["values"]=names
         if names:
             if self.pfrom.get() not in names:self.pfrom.set(names[0])
             if self.pto.get() not in names:self.pto.set(names[min(1,len(names)-1)])
+            if self.zone_point.get() not in names:self.zone_point.set("R" if "R" in names else names[0])
+            if self.coil_in.get() not in names:self.coil_in.set("OA" if "OA" in names else names[0])
+            if self.coil_out.get() not in names:self.coil_out.set("S" if "S" in names else names[-1])
         self.press.config(text=f"Presión: {p_atm_pa(self.altv())/1000:.2f} kPa  |  {p_atm_pa(self.altv())/3386.389:.2f} inHg")
 
     def select_list(self,e=None):
@@ -216,6 +240,76 @@ class App(tk.Tk):
         self.draw()
 
     def clear_processes(self): self.processes=[]; self.procinfo.delete("1.0","end"); self.draw()
+
+    def clear_adp(self):
+        self.adp_result=None
+        self.draw()
+
+    def calculate_adp_bypass(self):
+        try:
+            zn=self.zone_point.get(); inn=self.coil_in.get(); outn=self.coil_out.get()
+            if not zn or not inn or not outn:
+                raise ValueError("Seleccione zona, entrada y salida del serpentín.")
+            R=self.points[zn]; E=self.points[inn]; S=self.points[outn]
+            qs=float(self.qs.get()); ql=float(self.ql.get())
+            if qs<=0 or ql<0: raise ValueError("Las cargas deben ser válidas.")
+            rshf=qs/(qs+ql)
+
+            # Pendiente de la zona derivada del balance sensible/latente:
+            # Qs=1.08*CFM*dT ; Ql=0.68*CFM*dW(gr/lb)
+            # dW/dT=(Ql/Qs)*(1.08/0.68), en grains/lb por °F.
+            slope=(ql/qs)*(1.08/0.68)
+
+            # Intersección de la línea de pendiente de zona, prolongada desde R,
+            # con la curva de saturación. Se busca T_ADP < T_R.
+            def f(T):
+                wline_gr=R["Wgr"] + slope*(T-R["T"])
+                ws_gr=w_from_t_rh(T,100.0,self.altv())*GRAINS
+                return wline_gr-ws_gr
+
+            hi=R["T"]-0.01; lo=-20.0
+            # localizar cambio de signo robustamente
+            prevT=hi; prev=f(prevT); bracket=None
+            T=hi-0.25
+            while T>=lo:
+                cur=f(T)
+                if cur==0 or cur*prev<0:
+                    bracket=(T,prevT); break
+                prevT,prev=T,cur; T-=0.25
+            if bracket is None:
+                raise ValueError("No se encontró intersección ADP con saturación. Revise cargas y condición de zona.")
+            a,b=bracket
+            for _ in range(70):
+                m=(a+b)/2
+                if f(a)*f(m)<=0:b=m
+                else:a=m
+            tadp=(a+b)/2
+            wadp=w_from_t_rh(tadp,100,self.altv())
+            adp=state_trh(tadp,100,self.altv())
+
+            # BF real del serpentín usando entrada seleccionada y salida seleccionada.
+            denT=E["T"]-tadp
+            if abs(denT)<1e-9: raise ValueError("La entrada del serpentín coincide con el ADP.")
+            bfT=(S["T"]-tadp)/denT
+            denW=E["W"]-wadp
+            bfW=None if abs(denW)<1e-12 else (S["W"]-wadp)/denW
+            cf=1-bfT
+            self.adp_result={"zone":zn,"in":inn,"out":outn,"RSHF":rshf,"slope":slope,
+                             "ADP":adp,"BF_T":bfT,"BF_W":bfW,"CF":cf}
+            self.procinfo.delete("1.0","end")
+            txt=(f"ZONA / ADP / BYPASS\nRSHF = {rshf:.4f}\n"
+                 f"Pendiente zona = {slope:.4f} grains/lb·°F\n"
+                 f"ADP = {tadp:.2f} °F / 100% HR\n"
+                 f"BF temperatura = {bfT:.4f} ({bfT*100:.2f}%)\n"
+                 f"CF = {cf:.4f} ({cf*100:.2f}%)\n")
+            if bfW is not None:
+                txt+=f"BF humedad = {bfW:.4f} ({bfW*100:.2f}%)\nΔBF = {abs(bfT-bfW):.4f}\n"
+            if not (0<=bfT<=1):
+                txt+="AVISO: BF_T fuera de 0–1. Revise los puntos M/OA, S y la pendiente de zona.\n"
+            self.procinfo.insert("end",txt)
+            self.draw()
+        except Exception as e:
+            messagebox.showerror("ADP / Bypass",str(e))
 
     def bounds(self):return 20,125,0,210
     def xy(self,T,W):
@@ -348,6 +442,27 @@ class App(tk.Tk):
             c.create_line(x1,y1,x2,y2,fill="#006e9e",width=4,arrow="last",arrowshape=(12,14,5))
             c.create_text((x1+x2)/2,(y1+y2)/2-7,text=p["type"],fill="#005271",
                           font=("Segoe UI",7,"bold"))
+
+        # ADP interactivo derivado de la pendiente de zona
+        if self.adp_result:
+            z=self.points[self.adp_result["zone"]]
+            e=self.points[self.adp_result["in"]]
+            s=self.points[self.adp_result["out"]]
+            a=self.adp_result["ADP"]
+            xz,yz=self.xy(z["T"],z["Wgr"]); xa,ya=self.xy(a["T"],a["Wgr"])
+            xe,ye=self.xy(e["T"],e["Wgr"]); xs,ys=self.xy(s["T"],s["Wgr"])
+            # pendiente de zona R -> ADP
+            c.create_line(xz,yz,xa,ya,fill="#7b2cbf",width=3,dash=(8,4))
+            c.create_text((xz+xa)/2,(yz+ya)/2-10,text=f"RSHF {self.adp_result['RSHF']:.3f}",
+                          fill="#6a1b9a",font=("Segoe UI",8,"bold"))
+            # línea ideal de serpentín entrada -> ADP y proceso real entrada -> salida
+            c.create_line(xe,ye,xa,ya,fill="#555",width=2,dash=(4,3))
+            c.create_line(xe,ye,xs,ys,fill="#0077b6",width=4,arrow="last",arrowshape=(12,14,5))
+            c.create_oval(xa-7,ya-7,xa+7,ya+7,fill="#d00000",outline="white",width=2)
+            c.create_text(xa+9,ya-8,text=f"ADP {a['T']:.1f}°F",anchor="sw",
+                          fill="#a00000",font=("Segoe UI",9,"bold"))
+            c.create_text((xe+xs)/2,(ye+ys)/2+12,text=f"BF={self.adp_result['BF_T']:.3f}",
+                          fill="#005f8f",font=("Segoe UI",8,"bold"))
 
         # Puntos interactivos
         for n,q in self.points.items():
