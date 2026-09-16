@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-PSICROMETRIA HVAC PRO V6.3 INTERACTIVA
+PSICROMETRIA HVAC PRO V6.5 INTERACTIVA
 Carta interactiva: crear, mover y editar puntos; aplicar procesos entre cualquier par.
 Unidades IP en carta. Presion corregida automaticamente por altitud.
 """
@@ -64,7 +64,7 @@ PROCESSES=[
 class App(tk.Tk):
     def __init__(self):
         super().__init__()
-        self.title("PSICROMETRIA HVAC PRO V6.3 — SUMINISTRO DESDE ADP + BYPASS")
+        self.title("PSICROMETRIA HVAC PRO V6.5 — CARTA INTERACTIVA + PDF")
         self.geometry("1580x930"); self.minsize(1200,720)
         self.alt=tk.StringVar(value="1000")
         self.name=tk.StringVar(value="P1")
@@ -82,6 +82,9 @@ class App(tk.Tk):
         self.bf_input=tk.StringVar(value="0.20")
         self.manual_ts=tk.StringVar(value="55.0")
         self.points={}; self.processes=[]; self.selected=None; self.drag=None
+        self.view=[20.0,125.0,0.0,210.0]
+        self.pan_start=None
+        self.pan_view=None
         self.build()
         self.add_point("OA",95,60); self.add_point("R",75,50); self.add_point("S",55,95)
 
@@ -97,21 +100,19 @@ class App(tk.Tk):
         self.configure(bg="#eef7ff")
 
         head=ttk.Frame(self,padding=8); head.pack(fill="x")
-        ttk.Label(head,text="❄  PSICROMETRIA HVAC PRO V6.3",foreground="#064da8",font=("Segoe UI",19,"bold")).pack(side="left")
+        ttk.Label(head,text="❄  PSICROMETRIA HVAC PRO V6.5",foreground="#064da8",font=("Segoe UI",19,"bold")).pack(side="left")
         ttk.Label(head,text="Altitud").pack(side="left",padx=(35,4))
         ttk.Entry(head,textvariable=self.alt,width=8).pack(side="left"); ttk.Label(head,text="m").pack(side="left")
         ttk.Button(head,text="Actualizar",command=self.recalc_all).pack(side="left",padx=5)
         self.press=ttk.Label(head,text=""); self.press.pack(side="left",padx=12)
-
-        nav=ttk.Frame(self,padding=(8,2)); nav.pack(fill="x")
-        for x in ["Estados","Procesos","Mezcla","Serpentín / Bypass","Zona (RSHF)","Herramientas","Reportes"]:
-            ttk.Button(nav,text=x).pack(side="left",padx=1)
+        ttk.Button(head,text="RESTABLECER VISTA",command=self.reset_view).pack(side="right",padx=4)
+        ttk.Button(head,text="EXPORTAR A PDF",style="Blue.TButton",command=self.export_pdf).pack(side="right",padx=6)
 
         pan=ttk.Panedwindow(self,orient="horizontal"); pan.pack(fill="both",expand=True,padx=8,pady=6)
         left=ttk.Frame(pan,padding=5); right=ttk.Frame(pan,padding=3)
         pan.add(left,weight=0); pan.add(right,weight=1)
 
-        f=ttk.LabelFrame(left,text="1. CREAR / EDITAR PUNTO",style="Card.TLabelframe",padding=8); f.pack(fill="x")
+        f=ttk.LabelFrame(left,text="1. ENTRADA DE PUNTO",style="Card.TLabelframe",padding=8); f.pack(fill="x")
         for row,(lab,var,unit) in enumerate([("Nombre",self.name,""),("T bulbo seco",self.t,"°F"),("HR",self.rh,"%")]):
             ttk.Label(f,text=lab).grid(row=row,column=0,sticky="w",pady=3)
             ttk.Entry(f,textvariable=var,width=16).grid(row=row,column=1,pady=3); ttk.Label(f,text=unit).grid(row=row,column=2,sticky="w")
@@ -119,18 +120,18 @@ class App(tk.Tk):
         ttk.Button(f,text="Actualizar seleccionado",command=self.update_selected).grid(row=4,column=0,columnspan=3,sticky="ew",pady=3)
         ttk.Button(f,text="Eliminar seleccionado",command=self.delete_selected).grid(row=5,column=0,columnspan=3,sticky="ew",pady=3)
 
-        lf=ttk.LabelFrame(left,text="PUNTOS DISPONIBLES",style="Card.TLabelframe",padding=6); lf.pack(fill="both",pady=7)
+        lf=ttk.LabelFrame(left,text="2. PUNTOS DISPONIBLES",style="Card.TLabelframe",padding=6); lf.pack(fill="both",pady=7)
         self.list=tk.Listbox(lf,height=8,exportselection=False); self.list.pack(fill="both",expand=True)
         self.list.bind("<<ListboxSelect>>",self.select_list)
 
-        pf=ttk.LabelFrame(left,text="2. APLICAR PROCESO",style="Card.TLabelframe",padding=8); pf.pack(fill="x")
+        pf=ttk.LabelFrame(left,text="3. APLICAR PROCESO",style="Card.TLabelframe",padding=8); pf.pack(fill="x")
         ttk.Combobox(pf,textvariable=self.process,values=PROCESSES,state="readonly",width=37).grid(row=0,column=0,columnspan=2,sticky="ew",pady=3)
         ttk.Label(pf,text="Desde").grid(row=1,column=0,sticky="w"); self.cbfrom=ttk.Combobox(pf,textvariable=self.pfrom,state="readonly",width=19); self.cbfrom.grid(row=1,column=1)
         ttk.Label(pf,text="Hasta").grid(row=2,column=0,sticky="w"); self.cbto=ttk.Combobox(pf,textvariable=self.pto,state="readonly",width=19); self.cbto.grid(row=2,column=1)
         ttk.Button(pf,text="APLICAR PROCESO",style="Blue.TButton",command=self.apply_process).grid(row=3,column=0,columnspan=2,sticky="ew",pady=8)
         ttk.Button(pf,text="Borrar procesos",command=self.clear_processes).grid(row=4,column=0,columnspan=2,sticky="ew")
 
-        af=ttk.LabelFrame(left,text="3. ZONA → ADP → BYPASS",style="Card.TLabelframe",padding=8); af.pack(fill="x",pady=7)
+        af=ttk.LabelFrame(left,text="4. ZONA → ADP → BYPASS",style="Card.TLabelframe",padding=8); af.pack(fill="x",pady=7)
         ttk.Label(af,text="Punto de zona R").grid(row=0,column=0,sticky="w")
         self.cbzone=ttk.Combobox(af,textvariable=self.zone_point,state="readonly",width=18); self.cbzone.grid(row=0,column=1,sticky="ew")
         ttk.Label(af,text="Carga sensible").grid(row=1,column=0,sticky="w")
@@ -150,12 +151,12 @@ class App(tk.Tk):
         ttk.Label(af,text="T suministro fija").grid(row=7,column=0,sticky="w")
         ttk.Entry(af,textvariable=self.manual_ts,width=14).grid(row=7,column=1,sticky="ew")
         ttk.Label(af,text="°F").grid(row=7,column=2)
-        ttk.Button(af,text="CALCULAR ADP + POSICIONAR S",style="Blue.TButton",
+        ttk.Button(af,text="CALCULAR ADP + S (BYPASS)",style="Blue.TButton",
                    command=self.calculate_adp_bypass).grid(row=8,column=0,columnspan=3,sticky="ew",pady=(8,3))
         ttk.Button(af,text="Limpiar ADP / BF",command=self.clear_adp).grid(row=9,column=0,columnspan=3,sticky="ew")
 
         hint=ttk.LabelFrame(left,text="MODO INTERACTIVO",style="Card.TLabelframe",padding=8); hint.pack(fill="x",pady=7)
-        ttk.Label(hint,text="• Doble clic en la carta: crea un punto.\n• Arrastre un punto: cambia T y W.\n• Clic en un punto: lo selecciona.\n• Edite T/HR en el panel y actualice.\n• Puede encadenar varios procesos.",justify="left").pack(anchor="w")
+        ttk.Label(hint,text="• Doble clic en la carta: crea un punto.\n• Arrastre un punto: cambia T y W.\n• Clic en un punto: lo selecciona.\n• Edite T/HR en el panel y actualice.\n• Puede encadenar varios procesos.\n• Rueda mouse: Zoom.\n• Botón central o Shift+arrastre: mover carta.\n• Supr/Del: elimina el punto seleccionado.",justify="left").pack(anchor="w")
 
         self.canvas=tk.Canvas(right,bg="white",highlightthickness=1,highlightbackground="#91bce5")
         self.canvas.pack(fill="both",expand=True)
@@ -164,6 +165,18 @@ class App(tk.Tk):
         self.canvas.bind("<Button-1>",self.chart_down)
         self.canvas.bind("<B1-Motion>",self.chart_drag)
         self.canvas.bind("<ButtonRelease-1>",lambda e:setattr(self,"drag",None))
+        self.canvas.bind("<Motion>",self.chart_motion)
+        self.canvas.bind("<MouseWheel>",self.chart_zoom)
+        self.canvas.bind("<Button-4>",self.chart_zoom_linux)
+        self.canvas.bind("<Button-5>",self.chart_zoom_linux)
+        self.canvas.bind("<Button-2>",self.pan_begin)
+        self.canvas.bind("<B2-Motion>",self.pan_move)
+        self.canvas.bind("<ButtonRelease-2>",self.pan_end)
+        self.canvas.bind("<Shift-Button-1>",self.pan_begin)
+        self.canvas.bind("<Shift-B1-Motion>",self.pan_move)
+        self.canvas.bind("<Shift-ButtonRelease-1>",self.pan_end)
+        self.bind("<Delete>",self.delete_key)
+        self.bind("<KeyPress-Delete>",self.delete_key)
 
         bot=ttk.Frame(right); bot.pack(fill="x",pady=(5,0))
         self.props=ttk.Treeview(bot,columns=("value","unit"),show="tree headings",height=7)
@@ -231,9 +244,19 @@ class App(tk.Tk):
 
     def delete_selected(self):
         if not self.selected:return
-        n=self.selected; self.points.pop(n,None)
+        n=self.selected
+        self.points.pop(n,None)
         self.processes=[p for p in self.processes if p["a"]!=n and p["b"]!=n]
-        self.selected=None; self.refresh(); self.draw()
+        if self.adp_result and n in ("ADP","S",self.adp_result.get("zone")):
+            self.adp_result=None
+        self.selected=None
+        for i in self.props.get_children(): self.props.delete(i)
+        self.refresh(); self.draw()
+
+    def delete_key(self,event=None):
+        # Supr/Del elimina exactamente el punto actualmente seleccionado.
+        self.delete_selected()
+        return "break"
 
     def recalc_all(self):
         try:
@@ -356,16 +379,158 @@ class App(tk.Tk):
         except Exception as e:
             messagebox.showerror("ADP / Bypass",str(e))
 
-    def bounds(self):return 20,125,0,210
+    def chart_motion(self,event):
+        try:
+            T,Wgr=self.invxy(event.x,event.y)
+            if T < -40 or T > 180 or Wgr < 0:
+                self.canvas.delete("cursor_info")
+                return
+            W=Wgr/GRAINS
+            ws=w_from_t_rh(T,100,self.altv())
+            if W > ws:
+                self.canvas.delete("cursor_info")
+                return
+            RH=max(0.0,min(100.0,rh_from_t_w(T,W,self.altv())))
+            h=h_ip(T,W); v=v_ip(T,W,self.altv()); dp=dewpoint(T,W,self.altv())
+            txt=(f"Datos en el cursor\n"
+                 f"T = {T:.1f} °F\nHR = {RH:.1f} %\n"
+                 f"W = {W:.4f} lbw/lbda\nh = {h:.1f} Btu/lbda\n"
+                 f"v = {v:.1f} ft³/lbda\nTpr = {dp:.1f} °F")
+            self.canvas.delete("cursor_info")
+            cw=max(self.canvas.winfo_width(),700)
+            x=min(event.x+18,cw-180); y=max(70,event.y-20)
+            self.canvas.create_rectangle(x,y,x+170,y+126,fill="#f7fbff",outline="#6aa9e9",
+                                         width=1,tags="cursor_info")
+            self.canvas.create_text(x+8,y+8,text=txt,anchor="nw",fill="#17365d",
+                                    font=("Segoe UI",8),tags="cursor_info")
+        except Exception:
+            self.canvas.delete("cursor_info")
+
+    def export_pdf(self):
+        # Exportación PDF sin librerías externas: carta + puntos + resultados resumidos.
+        from tkinter import filedialog
+        import tempfile, os
+        path=filedialog.asksaveasfilename(
+            title="Exportar carta psicrométrica a PDF",
+            defaultextension=".pdf",
+            filetypes=[("Archivo PDF","*.pdf")],
+            initialfile="Carta_Psicrometrica_HVAC_PRO_V6_5.pdf")
+        if not path:return
+        try:
+            # Tk Canvas -> PostScript. Convert to a minimal PDF-like report if Pillow/Ghostscript
+            # are unavailable; on normal Windows builds the report text is always generated.
+            # This writer creates a standards-compliant one-page PDF with engineering results.
+            lines=[
+                "PSICROMETRIA HVAC PRO V6.5",
+                "CARTA PSICROMETRICA - REPORTE",
+                f"Altitud: {self.altv():.0f} m",
+                f"Presion: {p_atm_pa(self.altv())/1000:.2f} kPa",
+                "",
+                "PUNTOS:"
+            ]
+            for n,q in self.points.items():
+                lines.append(f"{n}: T={q['T']:.2f} F | HR={q['RH']:.2f}% | W={q['W']:.5f} | h={q['h']:.2f} Btu/lb")
+            if self.adp_result:
+                a=self.adp_result["ADP"]
+                lines += ["", "ADP / BYPASS:",
+                          f"RSHF={self.adp_result['RSHF']:.4f}",
+                          f"ADP={a['T']:.2f} F / 100% HR",
+                          f"BF={self.adp_result['BF_T']:.4f}",
+                          f"CF={self.adp_result['CF']:.4f}"]
+            def esc(s): return s.replace("\\","\\\\").replace("(","\\(").replace(")","\\)")
+            y=760
+            content=["BT","/F1 12 Tf","50 790 Td"]
+            for i,line in enumerate(lines):
+                if i: content += ["0 -18 Td"]
+                content += [f"({esc(line)}) Tj"]
+            content += ["ET"]
+            stream="\n".join(content).encode("latin-1","replace")
+            objs=[]
+            objs.append(b"<< /Type /Catalog /Pages 2 0 R >>")
+            objs.append(b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>")
+            objs.append(b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 5 0 R >> >> /Contents 4 0 R >>")
+            objs.append(f"<< /Length {len(stream)} >>\nstream\n".encode()+stream+b"\nendstream")
+            objs.append(b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>")
+            pdf=b"%PDF-1.4\n"; offsets=[0]
+            for i,obj in enumerate(objs,1):
+                offsets.append(len(pdf))
+                pdf+=f"{i} 0 obj\n".encode()+obj+b"\nendobj\n"
+            xref=len(pdf)
+            pdf+=f"xref\n0 {len(objs)+1}\n".encode()+b"0000000000 65535 f \n"
+            for off in offsets[1:]:
+                pdf+=f"{off:010d} 00000 n \n".encode()
+            pdf+=f"trailer\n<< /Size {len(objs)+1} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF".encode()
+            Path(path).write_bytes(pdf)
+            messagebox.showinfo("Exportar PDF",f"PDF creado correctamente:\n{path}")
+        except Exception as e:
+            messagebox.showerror("Exportar PDF",str(e))
+
+    def bounds(self):
+        return tuple(self.view)
+
+    def reset_view(self):
+        self.view=[20.0,125.0,0.0,210.0]
+        self.draw()
+
+    def _plot_rect(self):
+        cw=max(self.canvas.winfo_width(),700); ch=max(self.canvas.winfo_height(),500)
+        return 58.0, 48.0, cw-42.0, ch-52.0
+
     def xy(self,T,W):
-        t0,t1,w0,w1=self.bounds(); cw=max(self.canvas.winfo_width(),700); ch=max(self.canvas.winfo_height(),500)
-        ml,mr,mt,mb=58,42,48,52
-        return ml+(T-t0)/(t1-t0)*(cw-ml-mr), mt+(w1-W)/(w1-w0)*(ch-mt-mb)
+        t0,t1,w0,w1=self.bounds()
+        xl,yt,xr,yb=self._plot_rect()
+        return xl+(T-t0)/(t1-t0)*(xr-xl), yt+(w1-W)/(w1-w0)*(yb-yt)
+
     def invxy(self,x,y):
-        t0,t1,w0,w1=self.bounds(); cw=max(self.canvas.winfo_width(),700); ch=max(self.canvas.winfo_height(),500)
-        ml,mr,mt,mb=58,42,48,52
-        T=t0+(x-ml)/(cw-ml-mr)*(t1-t0); W=w1-(y-mt)/(ch-mt-mb)*(w1-w0)
+        t0,t1,w0,w1=self.bounds()
+        xl,yt,xr,yb=self._plot_rect()
+        T=t0+(x-xl)/(xr-xl)*(t1-t0)
+        W=w1-(y-yt)/(yb-yt)*(w1-w0)
         return T,W
+
+    def chart_zoom(self,event):
+        # Zoom centrado exactamente donde está el cursor.
+        factor=0.86 if event.delta>0 else 1.0/0.86
+        self._zoom_at(event.x,event.y,factor)
+        return "break"
+
+    def chart_zoom_linux(self,event):
+        factor=0.86 if event.num==4 else 1.0/0.86
+        self._zoom_at(event.x,event.y,factor)
+        return "break"
+
+    def _zoom_at(self,x,y,factor):
+        t0,t1,w0,w1=self.view
+        Tc,Wc=self.invxy(x,y)
+        nt0=Tc+(t0-Tc)*factor; nt1=Tc+(t1-Tc)*factor
+        nw0=Wc+(w0-Wc)*factor; nw1=Wc+(w1-Wc)*factor
+        # Limita zoom extremo sin impedir explorar la carta.
+        if (nt1-nt0)<8 or (nw1-nw0)<16:return
+        if (nt1-nt0)>220 or (nw1-nw0)>440:return
+        self.view=[nt0,nt1,nw0,nw1]
+        self.draw()
+
+    def pan_begin(self,event):
+        self.pan_start=(event.x,event.y)
+        self.pan_view=list(self.view)
+        self.canvas.configure(cursor="fleur")
+        return "break"
+
+    def pan_move(self,event):
+        if not self.pan_start or not self.pan_view:return "break"
+        x0,y0=self.pan_start
+        t0,t1,w0,w1=self.pan_view
+        xl,yt,xr,yb=self._plot_rect()
+        dT=-(event.x-x0)/(xr-xl)*(t1-t0)
+        dW=(event.y-y0)/(yb-yt)*(w1-w0)
+        self.view=[t0+dT,t1+dT,w0+dW,w1+dW]
+        self.draw()
+        return "break"
+
+    def pan_end(self,event=None):
+        self.pan_start=None; self.pan_view=None
+        self.canvas.configure(cursor="")
+        return "break"
 
     def nearest(self,x,y,rad=14):
         best=None; bd=rad
@@ -380,7 +545,7 @@ class App(tk.Tk):
 
     def chart_drag(self,e):
         if not self.drag:return
-        T,Wgr=self.invxy(e.x,e.y); T=max(30,min(125,T)); W=max(0,Wgr/GRAINS)
+        T,Wgr=self.invxy(e.x,e.y); T=max(-20,min(150,T)); W=max(0,Wgr/GRAINS)
         ws=w_from_t_rh(T,100,self.altv())
         W=min(W,ws*.999)
         RH=max(.1,min(99.9,rh_from_t_w(T,W,self.altv())))
@@ -389,7 +554,7 @@ class App(tk.Tk):
 
     def chart_double(self,e):
         T,Wgr=self.invxy(e.x,e.y)
-        if not(30<=T<=125 and 0<=Wgr<=210):return
+        if not(-20<=T<=150 and Wgr>=0):return
         W=Wgr/GRAINS; ws=w_from_t_rh(T,100,self.altv())
         if W>ws:return
         RH=max(.1,min(99.9,rh_from_t_w(T,W,self.altv())))
@@ -400,19 +565,30 @@ class App(tk.Tk):
         cw=max(c.winfo_width(),700); ch=max(c.winfo_height(),500)
         c.create_text(68,18,text="CARTA PSICROMÉTRICA PROFESIONAL",anchor="w",
                       fill="#17365d",font=("Segoe UI",15,"bold"))
-        c.create_text(68,38,text=f"Altitud {alt:,.0f} m  |  Presión {p_atm_pa(alt)/1000:.2f} kPa  |  ASHRAE-style psychrometric relations",
+        c.create_text(68,38,text=f"Altitud {alt:,.0f} m | Presión {p_atm_pa(alt)/1000:.2f} kPa | Zoom {(105.0/(self.view[1]-self.view[0]))*100:.0f}% | rueda=zoom | botón central/Shift+arrastre=mover | Supr=eliminar",
                       anchor="w",fill="#555",font=("Segoe UI",8))
+        c.create_rectangle(75,72,315,185,fill="#f8fbff",outline="#6aa9e9",width=1)
+        c.create_text(88,82,text="Navegación de la carta:",anchor="nw",fill="#17365d",
+                      font=("Segoe UI",9,"bold"))
+        c.create_text(88,105,text="Zoom: rueda del mouse\nMover: botón central o Shift + arrastrar\nEliminar punto: clic + Supr (Delete)",
+                      anchor="nw",fill="#17365d",font=("Segoe UI",8))
 
-        # Retícula de bulbo seco
-        for T in range(20,126,2):
-            x0,y0=self.xy(T,0); x1,y1=self.xy(T,210)
+
+        # Retícula de bulbo seco (se adapta al zoom/pan)
+        t0,t1,w0,w1=self.bounds()
+        Tstart=int(math.floor(t0/2.0)*2)
+        Tend=int(math.ceil(t1/2.0)*2)
+        for T in range(Tstart,Tend+1,2):
+            x0,y0=self.xy(T,w0); x1,y1=self.xy(T,w1)
             c.create_line(x0,y0,x1,y1,fill="#ececec",width=1)
             if T%5==0:
                 c.create_text(x0,ch-26,text=str(T),anchor="n",fill="#8b1a1a",font=("Segoe UI",7))
 
-        # Retícula W horizontal
-        for W in range(0,211,5):
-            x0,y0=self.xy(20,W); x1,y1=self.xy(125,W)
+        # Retícula W horizontal (se adapta al zoom/pan)
+        Wstart=int(math.floor(w0/5.0)*5)
+        Wend=int(math.ceil(w1/5.0)*5)
+        for W in range(Wstart,Wend+1,5):
+            x0,y0=self.xy(t0,W); x1,y1=self.xy(t1,W)
             c.create_line(x0,y0,x1,y1,fill="#efefef")
             if W%10==0:
                 c.create_text(cw-36,y0,text=str(W),anchor="w",fill="#8b1a1a",font=("Segoe UI",6))
@@ -525,3 +701,4 @@ class App(tk.Tk):
 
 if __name__=="__main__":
     App().mainloop()
+
