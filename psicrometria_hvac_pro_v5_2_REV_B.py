@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-PSICROMETRIA HVAC PRO V6.8 INTERACTIVA
+PSICROMETRIA HVAC PRO V6.8 REV A INTERACTIVA
 Carta interactiva: crear, mover y editar puntos; aplicar procesos entre cualquier par.
 Unidades IP en carta. Presion corregida automaticamente por altitud.
 """
@@ -74,7 +74,7 @@ PROCESSES=[
 class App(tk.Tk):
     def __init__(self):
         super().__init__()
-        self.title("PSICROMETRIA HVAC PRO V6.8 — MEZCLA CON PUNTO M EDITABLE")
+        self.title("PSICROMETRIA HVAC PRO V6.8 REV A REV A — MEZCLA CON PUNTO M EDITABLE")
         self.geometry("1580x930"); self.minsize(1200,720)
         self.alt=tk.StringVar(value="1000")
         self.name=tk.StringVar(value="P1")
@@ -89,6 +89,7 @@ class App(tk.Tk):
         self.ql=tk.StringVar(value="20000")
         self.adp_result=None
         self.supply_mode=tk.StringVar(value="Desde ADP + BF")
+        self.mix_name=tk.StringVar(value="M")
         self.bf_input=tk.StringVar(value="0.20")
         self.manual_ts=tk.StringVar(value="55.0")
         self.flow=tk.StringVar(value="5000")
@@ -114,7 +115,7 @@ class App(tk.Tk):
         self.configure(bg="#eef7ff")
 
         head=ttk.Frame(self,padding=8); head.pack(fill="x")
-        ttk.Label(head,text="❄  PSICROMETRIA HVAC PRO V6.8",foreground="#064da8",font=("Segoe UI",19,"bold")).pack(side="left")
+        ttk.Label(head,text="❄  PSICROMETRIA HVAC PRO V6.8 REV A",foreground="#064da8",font=("Segoe UI",19,"bold")).pack(side="left")
         ttk.Label(head,text="Altitud").pack(side="left",padx=(35,4))
         ttk.Entry(head,textvariable=self.alt,width=8).pack(side="left"); ttk.Label(head,text="m").pack(side="left")
         ttk.Button(head,text="Actualizar",command=self.recalc_all).pack(side="left",padx=5)
@@ -610,14 +611,14 @@ class App(tk.Tk):
             title="Exportar carta psicrométrica a PDF",
             defaultextension=".pdf",
             filetypes=[("Archivo PDF","*.pdf")],
-            initialfile="Carta_Psicrometrica_HVAC_PRO_V6_8.pdf")
+            initialfile="Carta_Psicrometrica_HVAC_PRO_V6_8_REV_A.pdf")
         if not path:return
         try:
             # Tk Canvas -> PostScript. Convert to a minimal PDF-like report if Pillow/Ghostscript
             # are unavailable; on normal Windows builds the report text is always generated.
             # This writer creates a standards-compliant one-page PDF with engineering results.
             lines=[
-                "PSICROMETRIA HVAC PRO V6.8",
+                "PSICROMETRIA HVAC PRO V6.8 REV A",
                 "CARTA PSICROMETRICA - REPORTE",
                 f"Altitud: {self.altv():.0f} m",
                 f"Presion: {p_atm_pa(self.altv())/1000:.2f} kPa",
