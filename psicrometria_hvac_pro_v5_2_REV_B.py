@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-PSICROMETRIA HVAC PRO V6.7 INTERACTIVA
+PSICROMETRIA HVAC PRO V6.8 INTERACTIVA
 Carta interactiva: crear, mover y editar puntos; aplicar procesos entre cualquier par.
 Unidades IP en carta. Presion corregida automaticamente por altitud.
 """
@@ -74,7 +74,7 @@ PROCESSES=[
 class App(tk.Tk):
     def __init__(self):
         super().__init__()
-        self.title("PSICROMETRIA HVAC PRO V6.7 — CALCULO DE PROCESOS HVAC")
+        self.title("PSICROMETRIA HVAC PRO V6.8 — MEZCLA CON PUNTO M EDITABLE")
         self.geometry("1580x930"); self.minsize(1200,720)
         self.alt=tk.StringVar(value="1000")
         self.name=tk.StringVar(value="P1")
@@ -95,6 +95,7 @@ class App(tk.Tk):
         self.input_pair=tk.StringVar(value="DB + HR")
         self.prop2=tk.StringVar(value="50.0")
         self.points={}; self.processes=[]; self.process_results=[]; self.selected=None; self.drag=None
+        self.mix_result=None
         self.view=[20.0,125.0,0.0,210.0]
         self.pan_start=None
         self.pan_view=None
@@ -113,7 +114,7 @@ class App(tk.Tk):
         self.configure(bg="#eef7ff")
 
         head=ttk.Frame(self,padding=8); head.pack(fill="x")
-        ttk.Label(head,text="❄  PSICROMETRIA HVAC PRO V6.7",foreground="#064da8",font=("Segoe UI",19,"bold")).pack(side="left")
+        ttk.Label(head,text="❄  PSICROMETRIA HVAC PRO V6.8",foreground="#064da8",font=("Segoe UI",19,"bold")).pack(side="left")
         ttk.Label(head,text="Altitud").pack(side="left",padx=(35,4))
         ttk.Entry(head,textvariable=self.alt,width=8).pack(side="left"); ttk.Label(head,text="m").pack(side="left")
         ttk.Button(head,text="Actualizar",command=self.recalc_all).pack(side="left",padx=5)
@@ -156,6 +157,8 @@ class App(tk.Tk):
         ttk.Combobox(pf,textvariable=self.process,values=PROCESSES,state="readonly",width=37).grid(row=0,column=0,columnspan=2,sticky="ew",pady=3)
         ttk.Label(pf,text="Desde").grid(row=1,column=0,sticky="w"); self.cbfrom=ttk.Combobox(pf,textvariable=self.pfrom,state="readonly",width=19); self.cbfrom.grid(row=1,column=1)
         ttk.Label(pf,text="Hasta").grid(row=2,column=0,sticky="w"); self.cbto=ttk.Combobox(pf,textvariable=self.pto,state="readonly",width=19); self.cbto.grid(row=2,column=1)
+        ttk.Label(pf,text="Resultado mezcla").grid(row=4,column=0,sticky="w")
+        ttk.Entry(pf,textvariable=self.mix_name,width=14).grid(row=4,column=1,columnspan=2,sticky="ew")
         ttk.Button(pf,text="APLICAR PROCESO",style="Blue.TButton",command=self.apply_process).grid(row=3,column=0,columnspan=2,sticky="ew",pady=8)
         ttk.Button(pf,text="Borrar procesos",command=self.clear_processes).grid(row=4,column=0,columnspan=2,sticky="ew")
 
@@ -352,6 +355,48 @@ class App(tk.Tk):
             self.draw()
         except Exception as e:messagebox.showerror("Altitud",str(e))
 
+    def calculate_mixture_point(self,a,b,name="M"):
+        if a not in self.points or b not in self.points:
+            raise ValueError("Seleccione dos puntos existentes.")
+        if a==b: raise ValueError("Los puntos de mezcla deben ser diferentes.")
+        A=self.points[a]; B=self.points[b]
+        q1=float(A.get("flow",0)); q2=float(B.get("flow",0))
+        if q1<=0 or q2<=0:
+            raise ValueError("Cada corriente debe tener caudal CFM mayor que cero.")
+
+        # Balance riguroso sobre masa de aire seco.
+        m1=q1/max(A["v"],1e-9); m2=q2/max(B["v"],1e-9); mt=m1+m2
+        W=(m1*A["W"]+m2*B["W"])/mt
+        h=(m1*A["h"]+m2*B["h"])/mt
+        T=(h-1061.0*W)/(0.240+0.444*W)
+        RH=rh_from_t_w(T,W,self.altv())
+        if RH<=0 or RH>100.2:
+            raise ValueError("La mezcla calculada queda fuera del rango psicrométrico.")
+
+        M=state_trh(T,min(RH,100),self.altv())
+        M["W"]=W; M["Wgr"]=W*GRAINS; M["h"]=h
+        M["v"]=v_ip(T,W,self.altv()); M["Tdp"]=dewpoint(T,W,self.altv())
+        M["Twb"]=wetbulb_from_t_w(T,W,self.altv())
+        M["flow"]=q1+q2
+
+        name=(name or "M").strip() or "M"
+        self.points[name]=M
+        self.mix_result={"a":a,"b":b,"name":name,"q1":q1,"q2":q2,"q":q1+q2}
+        return name,M
+
+    def show_mix_detail(self):
+        if not self.mix_result:return
+        r=self.mix_result; A=self.points[r["a"]]; B=self.points[r["b"]]; M=self.points[r["name"]]
+        self.procinfo.delete("1.0","end")
+        self.procinfo.insert("end",
+            f"MEZCLA DE DOS CORRIENTES\n{r['a']} + {r['b']} → {r['name']}\n\n"
+            f"{r['a']}: {r['q1']:,.0f} CFM | DB {A['T']:.2f}°F | HR {A['RH']:.2f}% | W {A['W']:.5f} | h {A['h']:.2f}\n"
+            f"{r['b']}: {r['q2']:,.0f} CFM | DB {B['T']:.2f}°F | HR {B['RH']:.2f}% | W {B['W']:.5f} | h {B['h']:.2f}\n\n"
+            f"{r['name']}: {r['q']:,.0f} CFM\nDB {M['T']:.2f}°F | WB {M['Twb']:.2f}°F | HR {M['RH']:.2f}%\n"
+            f"W {M['W']:.5f} lbw/lbda | h {M['h']:.2f} Btu/lbda | v {M['v']:.3f} ft³/lbda | DP {M['Tdp']:.2f}°F\n\n"
+            f"Punto {r['name']} creado. Puede editarlo o usarlo como entrada de otro proceso."
+        )
+
     def calculate_process_result(self,ptype,a,b):
         A=self.points[a]; B=self.points[b]
         # For a single-stream process use the origin airflow. If absent, use destination airflow.
@@ -395,25 +440,35 @@ class App(tk.Tk):
         if not a or not b or a==b:
             return messagebox.showwarning("Proceso","Seleccione dos puntos diferentes.")
         ptype=self.process.get()
-        self.processes.append({"type":ptype,"a":a,"b":b})
-        r=self.calculate_process_result(ptype,a,b)
-        self.process_results.append(r)
-        self.refresh_process_table()
-        self.procinfo.delete("1.0","end")
-        txt=(f"PROCESO CALCULADO\n{ptype}\n{a} → {b}\n"
-             f"Caudal = {r['cfm']:,.0f} CFM\n"
-             f"ΔT = {r['dT']:.2f} °F\nΔW = {r['dWgr']:.2f} grains/lbda\n"
-             f"Δh = {r['dh']:.2f} Btu/lbda\n"
-             f"Sensible = {r['Qs']:,.0f} BTU/h\n"
-             f"Latente = {r['Ql']:,.0f} BTU/h\n"
-             f"Total = {r['Qt']:,.0f} BTU/h\nSHR = {r['SHR']:.3f}\n")
-        if "capacity_TR" in r: txt+=f"Capacidad = {r['capacity_TR']:.2f} TR\n"
-        if "water_lbh" in r: txt+=f"Agua removida/agregada ≈ {r['water_lbh']:.2f} lb/h\n"
-        if r.get("note"): txt+="\n"+r["note"]
-        self.procinfo.insert("end",txt)
-        self.draw()
+        try:
+            if ptype=="Mezcla de dos corrientes":
+                name,M=self.calculate_mixture_point(a,b,self.mix_name.get())
+                self.processes.append({"type":"Mezcla","a":a,"b":name})
+                self.processes.append({"type":"Mezcla","a":b,"b":name})
+                self.process_results.append({
+                    "type":"Mezcla de dos corrientes","a":f"{a} + {b}","b":name,
+                    "cfm":M["flow"],"Qs":0.0,"Ql":0.0,"Qt":0.0,"SHR":0.0,
+                    "dT":0.0,"dWgr":0.0,"dh":0.0,"mix":True})
+                self.selected=name
+                self.refresh(); self.show_props(name); self.update_quickprops(M)
+                self.refresh_process_table(); self.show_mix_detail(); self.draw()
+                return
 
-    def clear_processes(self): self.processes=[]; self.process_results=[]; self.refresh_process_table(); self.procinfo.delete("1.0","end"); self.draw()
+            self.processes.append({"type":ptype,"a":a,"b":b})
+            r=self.calculate_process_result(ptype,a,b)
+            self.process_results.append(r); self.refresh_process_table()
+            self.procinfo.delete("1.0","end")
+            txt=(f"PROCESO CALCULADO\n{ptype}\n{a} → {b}\nCaudal = {r['cfm']:,.0f} CFM\n"
+                 f"ΔT = {r['dT']:.2f} °F\nΔW = {r['dWgr']:.2f} grains/lbda\nΔh = {r['dh']:.2f} Btu/lbda\n"
+                 f"Sensible = {r['Qs']:,.0f} BTU/h\nLatente = {r['Ql']:,.0f} BTU/h\n"
+                 f"Total = {r['Qt']:,.0f} BTU/h\nSHR = {r['SHR']:.3f}\n")
+            if "capacity_TR" in r: txt+=f"Capacidad = {r['capacity_TR']:.2f} TR\n"
+            if "water_lbh" in r: txt+=f"Agua removida/agregada ≈ {r['water_lbh']:.2f} lb/h\n"
+            self.procinfo.insert("end",txt); self.draw()
+        except Exception as ex:
+            messagebox.showerror("Proceso",str(ex))
+
+    def clear_processes(self): self.processes=[]; self.process_results=[]; self.mix_result=None; self.refresh_process_table(); self.procinfo.delete("1.0","end"); self.draw()
 
     def clear_adp(self):
         self.adp_result=None
@@ -555,14 +610,14 @@ class App(tk.Tk):
             title="Exportar carta psicrométrica a PDF",
             defaultextension=".pdf",
             filetypes=[("Archivo PDF","*.pdf")],
-            initialfile="Carta_Psicrometrica_HVAC_PRO_V6_7.pdf")
+            initialfile="Carta_Psicrometrica_HVAC_PRO_V6_8.pdf")
         if not path:return
         try:
             # Tk Canvas -> PostScript. Convert to a minimal PDF-like report if Pillow/Ghostscript
             # are unavailable; on normal Windows builds the report text is always generated.
             # This writer creates a standards-compliant one-page PDF with engineering results.
             lines=[
-                "PSICROMETRIA HVAC PRO V6.7",
+                "PSICROMETRIA HVAC PRO V6.8",
                 "CARTA PSICROMETRICA - REPORTE",
                 f"Altitud: {self.altv():.0f} m",
                 f"Presion: {p_atm_pa(self.altv())/1000:.2f} kPa",
@@ -571,6 +626,12 @@ class App(tk.Tk):
             ]
             for n,q in self.points.items():
                 lines.append(f"{n}: Q={q.get('flow',0):.0f} CFM | DB={q['T']:.2f} F | WB={q.get('Twb',wetbulb_from_t_w(q['T'],q['W'],self.altv())):.2f} F | HR={q['RH']:.2f}% | W={q['W']:.5f} | h={q['h']:.2f}")
+            if self.mix_result and self.mix_result.get("name") in self.points:
+                r=self.mix_result; M=self.points[r["name"]]
+                lines += ["", "DETALLE DE MEZCLA:",
+                          f"{r['a']} + {r['b']} -> {r['name']}",
+                          f"Caudales: {r['q1']:.0f} + {r['q2']:.0f} = {r['q']:.0f} CFM",
+                          f"{r['name']}: DB={M['T']:.2f} F | WB={M['Twb']:.2f} F | HR={M['RH']:.2f}% | W={M['W']:.5f} | h={M['h']:.2f}"]
             if self.process_results:
                 lines += ["", "PROCESOS CALCULADOS:"]
                 for r in self.process_results:
@@ -799,6 +860,14 @@ class App(tk.Tk):
             T=20+i*.5; W=w_from_t_rh(T,100,alt)*GRAINS
             if W<=210:sat+=self.xy(T,W)
         if len(sat)>3:c.create_line(*sat,fill="#8b0000",width=2)
+
+        # PUNTO DE MEZCLA
+        if self.mix_result and self.mix_result.get("name") in self.points:
+            mn=self.mix_result["name"]; mq=self.points[mn]
+            mx,my=self.xy(mq["T"],mq["Wgr"])
+            c.create_oval(mx-7,my-7,mx+7,my+7,fill="#f5a000",outline="#8a5300",width=2)
+            c.create_text(mx+10,my-15,text=f"{mn}  PUNTO DE MEZCLA",anchor="w",
+                          fill="#8a5300",font=("Segoe UI",8,"bold"))
 
         # Procesos definidos por el usuario
         for p in self.processes:
