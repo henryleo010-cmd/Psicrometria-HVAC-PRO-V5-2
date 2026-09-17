@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-PSICROMETRIA HVAC PRO V6.6 INTERACTIVA
+PSICROMETRIA HVAC PRO V6.7 INTERACTIVA
 Carta interactiva: crear, mover y editar puntos; aplicar procesos entre cualquier par.
 Unidades IP en carta. Presion corregida automaticamente por altitud.
 """
@@ -74,7 +74,7 @@ PROCESSES=[
 class App(tk.Tk):
     def __init__(self):
         super().__init__()
-        self.title("PSICROMETRIA HVAC PRO V6.6 — CAUDAL + ENTRADA PSICROMETRICA + PDF")
+        self.title("PSICROMETRIA HVAC PRO V6.7 — CALCULO DE PROCESOS HVAC")
         self.geometry("1580x930"); self.minsize(1200,720)
         self.alt=tk.StringVar(value="1000")
         self.name=tk.StringVar(value="P1")
@@ -94,7 +94,7 @@ class App(tk.Tk):
         self.flow=tk.StringVar(value="5000")
         self.input_pair=tk.StringVar(value="DB + HR")
         self.prop2=tk.StringVar(value="50.0")
-        self.points={}; self.processes=[]; self.selected=None; self.drag=None
+        self.points={}; self.processes=[]; self.process_results=[]; self.selected=None; self.drag=None
         self.view=[20.0,125.0,0.0,210.0]
         self.pan_start=None
         self.pan_view=None
@@ -113,7 +113,7 @@ class App(tk.Tk):
         self.configure(bg="#eef7ff")
 
         head=ttk.Frame(self,padding=8); head.pack(fill="x")
-        ttk.Label(head,text="❄  PSICROMETRIA HVAC PRO V6.6",foreground="#064da8",font=("Segoe UI",19,"bold")).pack(side="left")
+        ttk.Label(head,text="❄  PSICROMETRIA HVAC PRO V6.7",foreground="#064da8",font=("Segoe UI",19,"bold")).pack(side="left")
         ttk.Label(head,text="Altitud").pack(side="left",padx=(35,4))
         ttk.Entry(head,textvariable=self.alt,width=8).pack(side="left"); ttk.Label(head,text="m").pack(side="left")
         ttk.Button(head,text="Actualizar",command=self.recalc_all).pack(side="left",padx=5)
@@ -328,6 +328,8 @@ class App(tk.Tk):
         n=self.selected
         self.points.pop(n,None)
         self.processes=[p for p in self.processes if p["a"]!=n and p["b"]!=n]
+        self.process_results=[p for p in self.process_results if p["a"]!=n and p["b"]!=n]
+        self.refresh_process_table()
         if self.adp_result and n in ("ADP","S",self.adp_result.get("zone")):
             self.adp_result=None
         self.selected=None
@@ -350,15 +352,68 @@ class App(tk.Tk):
             self.draw()
         except Exception as e:messagebox.showerror("Altitud",str(e))
 
+    def calculate_process_result(self,ptype,a,b):
+        A=self.points[a]; B=self.points[b]
+        # For a single-stream process use the origin airflow. If absent, use destination airflow.
+        cfm=A.get("flow",0.0) or B.get("flow",0.0)
+        dT=B["T"]-A["T"]
+        dWgr=B["Wgr"]-A["Wgr"]
+        dh=B["h"]-A["h"]
+
+        # Standard IP HVAC approximations; signs indicate heat/moisture added (+) or removed (-).
+        qs=1.08*cfm*dT if cfm else 0.0
+        ql=0.68*cfm*dWgr if cfm else 0.0
+        qt=4.5*cfm*dh if cfm else 0.0
+        shr=abs(qs)/abs(qt) if abs(qt)>1e-9 else 0.0
+
+        result={"type":ptype,"a":a,"b":b,"cfm":cfm,"Qs":qs,"Ql":ql,"Qt":qt,"SHR":shr,
+                "dT":dT,"dWgr":dWgr,"dh":dh}
+
+        # Mixing: calculate mass/volume weighted expected mixed state when two inlet flows are known.
+        if ptype=="Mezcla de dos corrientes":
+            result["note"]="Para mezcla, la línea gráfica representa las dos condiciones seleccionadas. Use los caudales asociados a los puntos para balances de mezcla."
+
+        # Useful engineering interpretation.
+        if "Enfriamiento" in ptype:
+            result["capacity_TR"]=abs(qt)/12000.0
+        if "humidificación" in ptype.lower() or "deshumidificación" in ptype.lower():
+            # Approx. moisture transfer lb water/h from dry-air volume relation.
+            result["water_lbh"]=abs(0.68*cfm*dWgr)/1061.0 if cfm else 0.0
+        return result
+
+    def refresh_process_table(self):
+        if not hasattr(self,"proctable"): return
+        for i in self.proctable.get_children(): self.proctable.delete(i)
+        for r in self.process_results:
+            self.proctable.insert("", "end", values=(
+                r["type"], f'{r["a"]} → {r["b"]}',
+                f'{r["Qs"]:,.0f}', f'{r["Ql"]:,.0f}', f'{r["Qt"]:,.0f}', f'{r["SHR"]:.3f}'
+            ))
+
     def apply_process(self):
         a,b=self.pfrom.get(),self.pto.get()
-        if not a or not b or a==b:return messagebox.showwarning("Proceso","Seleccione dos puntos diferentes.")
-        self.processes.append({"type":self.process.get(),"a":a,"b":b})
+        if not a or not b or a==b:
+            return messagebox.showwarning("Proceso","Seleccione dos puntos diferentes.")
+        ptype=self.process.get()
+        self.processes.append({"type":ptype,"a":a,"b":b})
+        r=self.calculate_process_result(ptype,a,b)
+        self.process_results.append(r)
+        self.refresh_process_table()
         self.procinfo.delete("1.0","end")
-        self.procinfo.insert("end",f"PROCESO APLICADO\n{self.process.get()}\n{a} → {b}\n\nPuede seleccionar otros puntos y agregar otro proceso.")
+        txt=(f"PROCESO CALCULADO\n{ptype}\n{a} → {b}\n"
+             f"Caudal = {r['cfm']:,.0f} CFM\n"
+             f"ΔT = {r['dT']:.2f} °F\nΔW = {r['dWgr']:.2f} grains/lbda\n"
+             f"Δh = {r['dh']:.2f} Btu/lbda\n"
+             f"Sensible = {r['Qs']:,.0f} BTU/h\n"
+             f"Latente = {r['Ql']:,.0f} BTU/h\n"
+             f"Total = {r['Qt']:,.0f} BTU/h\nSHR = {r['SHR']:.3f}\n")
+        if "capacity_TR" in r: txt+=f"Capacidad = {r['capacity_TR']:.2f} TR\n"
+        if "water_lbh" in r: txt+=f"Agua removida/agregada ≈ {r['water_lbh']:.2f} lb/h\n"
+        if r.get("note"): txt+="\n"+r["note"]
+        self.procinfo.insert("end",txt)
         self.draw()
 
-    def clear_processes(self): self.processes=[]; self.procinfo.delete("1.0","end"); self.draw()
+    def clear_processes(self): self.processes=[]; self.process_results=[]; self.refresh_process_table(); self.procinfo.delete("1.0","end"); self.draw()
 
     def clear_adp(self):
         self.adp_result=None
@@ -500,14 +555,14 @@ class App(tk.Tk):
             title="Exportar carta psicrométrica a PDF",
             defaultextension=".pdf",
             filetypes=[("Archivo PDF","*.pdf")],
-            initialfile="Carta_Psicrometrica_HVAC_PRO_V6_6.pdf")
+            initialfile="Carta_Psicrometrica_HVAC_PRO_V6_7.pdf")
         if not path:return
         try:
             # Tk Canvas -> PostScript. Convert to a minimal PDF-like report if Pillow/Ghostscript
             # are unavailable; on normal Windows builds the report text is always generated.
             # This writer creates a standards-compliant one-page PDF with engineering results.
             lines=[
-                "PSICROMETRIA HVAC PRO V6.6",
+                "PSICROMETRIA HVAC PRO V6.7",
                 "CARTA PSICROMETRICA - REPORTE",
                 f"Altitud: {self.altv():.0f} m",
                 f"Presion: {p_atm_pa(self.altv())/1000:.2f} kPa",
@@ -516,6 +571,10 @@ class App(tk.Tk):
             ]
             for n,q in self.points.items():
                 lines.append(f"{n}: Q={q.get('flow',0):.0f} CFM | DB={q['T']:.2f} F | WB={q.get('Twb',wetbulb_from_t_w(q['T'],q['W'],self.altv())):.2f} F | HR={q['RH']:.2f}% | W={q['W']:.5f} | h={q['h']:.2f}")
+            if self.process_results:
+                lines += ["", "PROCESOS CALCULADOS:"]
+                for r in self.process_results:
+                    lines.append(f"{r['type']} {r['a']}->{r['b']}: Qs={r['Qs']:.0f}, Ql={r['Ql']:.0f}, Qt={r['Qt']:.0f} BTU/h, SHR={r['SHR']:.3f}")
             if self.adp_result:
                 a=self.adp_result["ADP"]
                 lines += ["", "ADP / BYPASS:",
@@ -747,7 +806,12 @@ class App(tk.Tk):
             a,b=self.points[p["a"]],self.points[p["b"]]
             x1,y1=self.xy(a["T"],a["Wgr"]); x2,y2=self.xy(b["T"],b["Wgr"])
             c.create_line(x1,y1,x2,y2,fill="#006e9e",width=4,arrow="last",arrowshape=(12,14,5))
-            c.create_text((x1+x2)/2,(y1+y2)/2-7,text=p["type"],fill="#005271",
+            idx=self.processes.index(p)
+            label=p["type"]
+            if idx < len(self.process_results):
+                rr=self.process_results[idx]
+                label+=f" | Q={rr['Qt']/1000:.1f} kBTU/h | SHR={rr['SHR']:.2f}"
+            c.create_text((x1+x2)/2,(y1+y2)/2-7,text=label,fill="#005271",
                           font=("Segoe UI",7,"bold"))
 
         # ADP interactivo derivado de la pendiente de zona
