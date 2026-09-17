@@ -1,10 +1,11 @@
 # -*- coding: utf-8 -*-
 """
-PSICROMETRIA HVAC PRO V6.5 INTERACTIVA
+PSICROMETRIA HVAC PRO V6.6 INTERACTIVA
 Carta interactiva: crear, mover y editar puntos; aplicar procesos entre cualquier par.
 Unidades IP en carta. Presion corregida automaticamente por altitud.
 """
 import math, tkinter as tk
+from pathlib import Path
 from tkinter import ttk, messagebox
 
 GRAINS=7000.0
@@ -43,11 +44,20 @@ def dewpoint(tf,w,alt):
         else: hi=m
     return (lo+hi)/2
 
+def wetbulb_from_t_w(tf,w,alt):
+    target=h_ip(tf,w); lo=-40.0; hi=float(tf)
+    for _ in range(70):
+        m=(lo+hi)/2.0
+        wm=w_from_t_rh(m,100.0,alt)
+        if h_ip(m,wm)<target: lo=m
+        else: hi=m
+    return (lo+hi)/2.0
+
 def state_trh(tf,rh,alt):
     w=w_from_t_rh(tf,rh,alt)
     return {"T":float(tf),"RH":float(rh),"W":w,"Wgr":w*GRAINS,
             "h":h_ip(float(tf),w),"v":v_ip(float(tf),w,alt),
-            "Tdp":dewpoint(float(tf),w,alt)}
+            "Tdp":dewpoint(float(tf),w,alt),"Twb":wetbulb_from_t_w(float(tf),w,alt)}
 
 PROCESSES=[
  "Línea libre / proceso personalizado",
@@ -64,7 +74,7 @@ PROCESSES=[
 class App(tk.Tk):
     def __init__(self):
         super().__init__()
-        self.title("PSICROMETRIA HVAC PRO V6.5 — CARTA INTERACTIVA + PDF")
+        self.title("PSICROMETRIA HVAC PRO V6.6 — CAUDAL + ENTRADA PSICROMETRICA + PDF")
         self.geometry("1580x930"); self.minsize(1200,720)
         self.alt=tk.StringVar(value="1000")
         self.name=tk.StringVar(value="P1")
@@ -81,6 +91,9 @@ class App(tk.Tk):
         self.supply_mode=tk.StringVar(value="Desde ADP + BF")
         self.bf_input=tk.StringVar(value="0.20")
         self.manual_ts=tk.StringVar(value="55.0")
+        self.flow=tk.StringVar(value="5000")
+        self.input_pair=tk.StringVar(value="DB + HR")
+        self.prop2=tk.StringVar(value="50.0")
         self.points={}; self.processes=[]; self.selected=None; self.drag=None
         self.view=[20.0,125.0,0.0,210.0]
         self.pan_start=None
@@ -100,7 +113,7 @@ class App(tk.Tk):
         self.configure(bg="#eef7ff")
 
         head=ttk.Frame(self,padding=8); head.pack(fill="x")
-        ttk.Label(head,text="❄  PSICROMETRIA HVAC PRO V6.5",foreground="#064da8",font=("Segoe UI",19,"bold")).pack(side="left")
+        ttk.Label(head,text="❄  PSICROMETRIA HVAC PRO V6.6",foreground="#064da8",font=("Segoe UI",19,"bold")).pack(side="left")
         ttk.Label(head,text="Altitud").pack(side="left",padx=(35,4))
         ttk.Entry(head,textvariable=self.alt,width=8).pack(side="left"); ttk.Label(head,text="m").pack(side="left")
         ttk.Button(head,text="Actualizar",command=self.recalc_all).pack(side="left",padx=5)
@@ -112,13 +125,28 @@ class App(tk.Tk):
         left=ttk.Frame(pan,padding=5); right=ttk.Frame(pan,padding=3)
         pan.add(left,weight=0); pan.add(right,weight=1)
 
-        f=ttk.LabelFrame(left,text="1. ENTRADA DE PUNTO",style="Card.TLabelframe",padding=8); f.pack(fill="x")
-        for row,(lab,var,unit) in enumerate([("Nombre",self.name,""),("T bulbo seco",self.t,"°F"),("HR",self.rh,"%")]):
-            ttk.Label(f,text=lab).grid(row=row,column=0,sticky="w",pady=3)
-            ttk.Entry(f,textvariable=var,width=16).grid(row=row,column=1,pady=3); ttk.Label(f,text=unit).grid(row=row,column=2,sticky="w")
-        ttk.Button(f,text="Agregar punto",style="Blue.TButton",command=self.add_from_form).grid(row=3,column=0,columnspan=3,sticky="ew",pady=(8,3))
-        ttk.Button(f,text="Actualizar seleccionado",command=self.update_selected).grid(row=4,column=0,columnspan=3,sticky="ew",pady=3)
-        ttk.Button(f,text="Eliminar seleccionado",command=self.delete_selected).grid(row=5,column=0,columnspan=3,sticky="ew",pady=3)
+        f=ttk.LabelFrame(left,text="1. ENTRADA / EDITAR PUNTO",style="Card.TLabelframe",padding=8); f.pack(fill="x")
+        ttk.Label(f,text="Nombre").grid(row=0,column=0,sticky="w")
+        ttk.Entry(f,textvariable=self.name,width=12).grid(row=0,column=1,sticky="ew")
+        ttk.Label(f,text="Caudal").grid(row=1,column=0,sticky="w")
+        ttk.Entry(f,textvariable=self.flow,width=12).grid(row=1,column=1,sticky="ew")
+        ttk.Label(f,text="CFM").grid(row=1,column=2,sticky="w")
+        ttk.Label(f,text="Par de propiedades").grid(row=2,column=0,sticky="w")
+        self.cbpair=ttk.Combobox(f,textvariable=self.input_pair,state="readonly",width=18,
+            values=["DB + HR","DB + WB","DB + W","DB + DP","DB + h"])
+        self.cbpair.grid(row=2,column=1,columnspan=2,sticky="ew")
+        self.cbpair.bind("<<ComboboxSelected>>",self.change_input_pair)
+        ttk.Label(f,text="T bulbo seco (DB)").grid(row=3,column=0,sticky="w")
+        ttk.Entry(f,textvariable=self.t,width=12).grid(row=3,column=1,sticky="ew")
+        ttk.Label(f,text="°F").grid(row=3,column=2,sticky="w")
+        self.lab2=ttk.Label(f,text="Humedad relativa (HR)"); self.lab2.grid(row=4,column=0,sticky="w")
+        ttk.Entry(f,textvariable=self.prop2,width=12).grid(row=4,column=1,sticky="ew")
+        self.unit2=ttk.Label(f,text="%"); self.unit2.grid(row=4,column=2,sticky="w")
+        ttk.Button(f,text="AGREGAR PUNTO",style="Blue.TButton",command=self.add_from_form).grid(row=5,column=0,columnspan=3,sticky="ew",pady=(7,2))
+        ttk.Button(f,text="Actualizar seleccionado",command=self.update_selected).grid(row=6,column=0,columnspan=3,sticky="ew",pady=2)
+        ttk.Button(f,text="Eliminar seleccionado",command=self.delete_selected).grid(row=7,column=0,columnspan=3,sticky="ew",pady=2)
+        self.quickprops=ttk.Label(f,text="Propiedades calculadas: DB, WB, HR, W, h, v, DP",justify="left")
+        self.quickprops.grid(row=8,column=0,columnspan=3,sticky="w",pady=(6,0))
 
         lf=ttk.LabelFrame(left,text="2. PUNTOS DISPONIBLES",style="Card.TLabelframe",padding=6); lf.pack(fill="both",pady=7)
         self.list=tk.Listbox(lf,height=8,exportselection=False); self.list.pack(fill="both",expand=True)
@@ -189,11 +217,60 @@ class App(tk.Tk):
     def add_point(self,name,T,RH):
         base=name; i=2
         while name in self.points: name=f"{base}{i}"; i+=1
-        self.points[name]=state_trh(T,RH,self.altv()); self.refresh(); self.draw()
+        q=state_trh(T,RH,self.altv()); q["flow"]=0.0
+        self.points[name]=q; self.refresh(); self.draw()
+
+    def change_input_pair(self,event=None):
+        labels={"DB + HR":("Humedad relativa (HR)","%"),
+                "DB + WB":("T bulbo húmedo (WB)","°F"),
+                "DB + W":("Humedad específica W","lbw/lbda"),
+                "DB + DP":("Punto de rocío (DP)","°F"),
+                "DB + h":("Entalpía h","Btu/lbda")}
+        lab,unit=labels[self.input_pair.get()]
+        self.lab2.config(text=lab); self.unit2.config(text=unit)
+
+    def state_from_inputs(self):
+        T=float(self.t.get()); x=float(self.prop2.get()); alt=self.altv()
+        pair=self.input_pair.get()
+        if pair=="DB + HR":
+            if not 0<x<=100: raise ValueError("HR debe estar entre 0 y 100%.")
+            return state_trh(T,x,alt)
+        if pair=="DB + WB":
+            if x>T: raise ValueError("WB no puede ser mayor que DB.")
+            ws=w_from_t_rh(x,100,alt); hs=h_ip(x,ws)
+            w=(hs-.240*T)/(1061+.444*T)
+        elif pair=="DB + W":
+            w=x
+        elif pair=="DB + DP":
+            if x>T: raise ValueError("DP no puede ser mayor que DB.")
+            w=w_from_t_rh(x,100,alt)
+        elif pair=="DB + h":
+            w=(x-.240*T)/(1061+.444*T)
+        else:
+            raise ValueError("Par de propiedades no válido.")
+        if w<0: raise ValueError("La combinación produce humedad específica negativa.")
+        RH=rh_from_t_w(T,w,alt)
+        if RH<=0 or RH>100.2: raise ValueError("La combinación queda fuera del rango psicrométrico.")
+        q=state_trh(T,min(RH,100),alt)
+        q["W"]=w; q["Wgr"]=w*GRAINS; q["h"]=h_ip(T,w); q["v"]=v_ip(T,w,alt)
+        q["Tdp"]=dewpoint(T,w,alt); q["Twb"]=wetbulb_from_t_w(T,w,alt)
+        return q
+
+    def update_quickprops(self,q):
+        self.quickprops.config(text=
+            f"DB {q['T']:.2f}°F | WB {q.get('Twb',wetbulb_from_t_w(q['T'],q['W'],self.altv())):.2f}°F | HR {q['RH']:.2f}%\n"
+            f"W {q['W']:.5f} lb/lb | h {q['h']:.2f} Btu/lb | v {q['v']:.3f} ft³/lb\n"
+            f"DP {q['Tdp']:.2f}°F | Caudal {q.get('flow',0):.0f} CFM")
 
     def add_from_form(self):
-        try:self.add_point(self.name.get().strip() or f"P{len(self.points)+1}",float(self.t.get()),float(self.rh.get()))
-        except Exception as e:messagebox.showerror("Punto",str(e))
+        try:
+            name=self.name.get().strip() or f"P{len(self.points)+1}"
+            q=self.state_from_inputs(); q["flow"]=float(self.flow.get() or 0)
+            base=name; i=2
+            while name in self.points: name=f"{base}{i}"; i+=1
+            self.points[name]=q; self.selected=name
+            self.refresh(); self.show_props(name); self.update_quickprops(q); self.draw()
+        except Exception as e: messagebox.showerror("Punto",str(e))
 
     def refresh(self):
         cur=self.selected
@@ -218,19 +295,23 @@ class App(tk.Tk):
     def select_name(self,n):
         self.selected=n; q=self.points[n]
         self.name.set(n); self.t.set(f"{q['T']:.2f}"); self.rh.set(f"{q['RH']:.2f}")
-        self.show_props(n); self.draw()
+        self.flow.set(f"{q.get('flow',0):.0f}"); self.input_pair.set("DB + HR"); self.prop2.set(f"{q['RH']:.2f}")
+        self.change_input_pair(); self.show_props(n); self.update_quickprops(q); self.draw()
 
     def show_props(self,n):
         for i in self.props.get_children():self.props.delete(i)
         q=self.points[n]
-        vals=[("T bulbo seco",q["T"],"°F"),("HR",q["RH"],"%"),("W",q["W"],"lbw/lbda"),("W",q["Wgr"],"grains/lbda"),("Entalpía",q["h"],"Btu/lbda"),("Volumen específico",q["v"],"ft³/lbda"),("Punto de rocío",q["Tdp"],"°F")]
+        vals=[("T bulbo seco",q["T"],"°F"),("T bulbo húmedo",q.get("Twb",wetbulb_from_t_w(q["T"],q["W"],self.altv())),"°F"),
+              ("HR",q["RH"],"%"),("W",q["W"],"lbw/lbda"),("W",q["Wgr"],"grains/lbda"),
+              ("Entalpía",q["h"],"Btu/lbda"),("Volumen específico",q["v"],"ft³/lbda"),
+              ("Punto de rocío",q["Tdp"],"°F"),("Caudal",q.get("flow",0),"CFM")]
         for a,b,u in vals:self.props.insert("", "end",text=a,values=(f"{b:.4f}",u))
 
     def update_selected(self):
         if not self.selected:return
         try:
             old=self.selected; new=self.name.get().strip() or old
-            q=state_trh(float(self.t.get()),float(self.rh.get()),self.altv())
+            q=self.state_from_inputs(); q["flow"]=float(self.flow.get() or 0)
             if new!=old:
                 if new in self.points: raise ValueError("Ya existe un punto con ese nombre.")
                 self.points.pop(old); self.points[new]=q
@@ -238,9 +319,9 @@ class App(tk.Tk):
                     if p["a"]==old:p["a"]=new
                     if p["b"]==old:p["b"]=new
                 self.selected=new
-            else:self.points[old]=q
-            self.refresh(); self.show_props(self.selected); self.draw()
-        except Exception as e:messagebox.showerror("Actualizar",str(e))
+            else: self.points[old]=q
+            self.refresh(); self.show_props(self.selected); self.update_quickprops(q); self.draw()
+        except Exception as e: messagebox.showerror("Actualizar",str(e))
 
     def delete_selected(self):
         if not self.selected:return
@@ -261,7 +342,9 @@ class App(tk.Tk):
     def recalc_all(self):
         try:
             alt=self.altv()
-            for n,q in list(self.points.items()):self.points[n]=state_trh(q["T"],q["RH"],alt)
+            for n,q in list(self.points.items()):
+                flow=q.get("flow",0.0); nq=state_trh(q["T"],q["RH"],alt); nq["flow"]=flow
+                self.points[n]=nq
             self.refresh()
             if self.selected:self.show_props(self.selected)
             self.draw()
@@ -282,6 +365,9 @@ class App(tk.Tk):
         self.supply_mode=tk.StringVar(value="Desde ADP + BF")
         self.bf_input=tk.StringVar(value="0.20")
         self.manual_ts=tk.StringVar(value="55.0")
+        self.flow=tk.StringVar(value="5000")
+        self.input_pair=tk.StringVar(value="DB + HR")
+        self.prop2=tk.StringVar(value="50.0")
         self.draw()
 
     def calculate_adp_bypass(self):
@@ -414,14 +500,14 @@ class App(tk.Tk):
             title="Exportar carta psicrométrica a PDF",
             defaultextension=".pdf",
             filetypes=[("Archivo PDF","*.pdf")],
-            initialfile="Carta_Psicrometrica_HVAC_PRO_V6_5.pdf")
+            initialfile="Carta_Psicrometrica_HVAC_PRO_V6_6.pdf")
         if not path:return
         try:
             # Tk Canvas -> PostScript. Convert to a minimal PDF-like report if Pillow/Ghostscript
             # are unavailable; on normal Windows builds the report text is always generated.
             # This writer creates a standards-compliant one-page PDF with engineering results.
             lines=[
-                "PSICROMETRIA HVAC PRO V6.5",
+                "PSICROMETRIA HVAC PRO V6.6",
                 "CARTA PSICROMETRICA - REPORTE",
                 f"Altitud: {self.altv():.0f} m",
                 f"Presion: {p_atm_pa(self.altv())/1000:.2f} kPa",
@@ -429,7 +515,7 @@ class App(tk.Tk):
                 "PUNTOS:"
             ]
             for n,q in self.points.items():
-                lines.append(f"{n}: T={q['T']:.2f} F | HR={q['RH']:.2f}% | W={q['W']:.5f} | h={q['h']:.2f} Btu/lb")
+                lines.append(f"{n}: Q={q.get('flow',0):.0f} CFM | DB={q['T']:.2f} F | WB={q.get('Twb',wetbulb_from_t_w(q['T'],q['W'],self.altv())):.2f} F | HR={q['RH']:.2f}% | W={q['W']:.5f} | h={q['h']:.2f}")
             if self.adp_result:
                 a=self.adp_result["ADP"]
                 lines += ["", "ADP / BYPASS:",
@@ -701,4 +787,3 @@ class App(tk.Tk):
 
 if __name__=="__main__":
     App().mainloop()
-
